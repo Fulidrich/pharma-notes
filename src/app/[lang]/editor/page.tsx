@@ -3,10 +3,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { isLanguage, labels, SECTION_KEYS, SectionKey } from "@/lib/i18n";
 
+type SessionState = {
+  configured: boolean;
+  authenticated: boolean;
+};
+
 export default function EditorPage({ params }: { params: { lang: string } }) {
   const lang = isLanguage(params.lang) ? params.lang : "en";
   const t = labels[lang];
 
+  const [session, setSession] = useState<SessionState | null>(null);
+  const [password, setPassword] = useState("");
   const [section, setSection] = useState<SectionKey>("drugs");
   const [slugs, setSlugs] = useState<string[]>([]);
   const [existingSlug, setExistingSlug] = useState<string>("");
@@ -19,34 +26,54 @@ export default function EditorPage({ params }: { params: { lang: string } }) {
     () =>
       lang === "en"
         ? {
-            title: "Content Editor",
-            subtitle: "Create and edit markdown notes directly in the browser.",
+            title: "Admin Content Manager",
+            subtitle: "Create, edit, and delete notes directly from the website.",
             section: "Section",
             existing: "Existing files",
             newSlug: "New slug",
             load: "Load",
             template: "New from template",
             save: "Save",
+            remove: "Delete",
+            login: "Admin Login",
+            password: "Password",
+            signIn: "Sign in",
+            signOut: "Sign out",
             placeholder: "example: sertraline",
             help: "Slug format: lowercase letters, numbers, hyphens (e.g. sertraline).",
-            deployNote:
-              "Note: on Vercel production, file writing is read-only. Use this editor locally, or migrate save to a database."
+            unconfigured: "ADMIN_PASSWORD is not configured on server."
           }
         : {
-            title: "内容编辑器",
-            subtitle: "直接在网页中创建和编辑 Markdown 笔记。",
+            title: "后台内容管理",
+            subtitle: "直接在网站中新增、编辑、删除笔记。",
             section: "栏目",
             existing: "已有文件",
             newSlug: "新 slug",
             load: "加载",
             template: "按模板新建",
             save: "保存",
+            remove: "删除",
+            login: "管理员登录",
+            password: "密码",
+            signIn: "登录",
+            signOut: "退出",
             placeholder: "示例：sertraline",
             help: "slug 格式：小写字母、数字、短横线（如 sertraline）。",
-            deployNote: "提示：Vercel 线上环境文件系统只读。请本地使用编辑器，或改为数据库存储。"
+            unconfigured: "服务器未配置 ADMIN_PASSWORD。"
           },
     [lang]
   );
+
+  async function refreshSession() {
+    const res = await fetch("/api/admin/session", { cache: "no-store" });
+    if (!res.ok) {
+      setSession({ configured: false, authenticated: false });
+      return;
+    }
+
+    const json = (await res.json()) as SessionState;
+    setSession(json);
+  }
 
   async function fetchSlugs(nextSection: SectionKey) {
     const res = await fetch(`/api/editor?action=list&section=${nextSection}`, { cache: "no-store" });
@@ -55,14 +82,52 @@ export default function EditorPage({ params }: { params: { lang: string } }) {
       setExistingSlug("");
       return;
     }
+
     const json = (await res.json()) as { slugs: string[] };
     setSlugs(json.slugs);
     setExistingSlug((prev) => (prev && json.slugs.includes(prev) ? prev : json.slugs[0] || ""));
   }
 
   useEffect(() => {
+    void refreshSession();
+  }, []);
+
+  useEffect(() => {
+    if (!session?.authenticated) {
+      return;
+    }
+
     void fetchSlugs(section);
-  }, [section]);
+  }, [section, session?.authenticated]);
+
+  async function signIn() {
+    setLoading(true);
+    setStatus("");
+
+    const res = await fetch("/api/admin/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password })
+    });
+
+    setLoading(false);
+
+    if (!res.ok) {
+      const err = (await res.json().catch(() => null)) as { error?: string } | null;
+      setStatus(err?.error || (lang === "en" ? "Login failed." : "登录失败。"));
+      return;
+    }
+
+    setPassword("");
+    await refreshSession();
+    setStatus(lang === "en" ? "Signed in." : "已登录。");
+  }
+
+  async function signOut() {
+    await fetch("/api/admin/logout", { method: "POST" });
+    setSession((prev) => ({ configured: prev?.configured ?? false, authenticated: false }));
+    setStatus(lang === "en" ? "Signed out." : "已退出。" );
+  }
 
   async function loadCurrentFile() {
     const slug = newSlug.trim() || existingSlug;
@@ -81,7 +146,8 @@ export default function EditorPage({ params }: { params: { lang: string } }) {
     setLoading(false);
 
     if (!res.ok) {
-      setStatus(lang === "en" ? "Failed to load file." : "加载文件失败。");
+      const err = (await res.json().catch(() => null)) as { error?: string } | null;
+      setStatus(err?.error || (lang === "en" ? "Failed to load file." : "加载文件失败。"));
       return;
     }
 
@@ -107,7 +173,8 @@ export default function EditorPage({ params }: { params: { lang: string } }) {
     setLoading(false);
 
     if (!res.ok) {
-      setStatus(lang === "en" ? "Failed to get template." : "获取模板失败。");
+      const err = (await res.json().catch(() => null)) as { error?: string } | null;
+      setStatus(err?.error || (lang === "en" ? "Failed to get template." : "获取模板失败。"));
       return;
     }
 
@@ -131,11 +198,7 @@ export default function EditorPage({ params }: { params: { lang: string } }) {
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({
-        section,
-        slug,
-        content
-      })
+      body: JSON.stringify({ section, slug, content })
     });
 
     setLoading(false);
@@ -152,10 +215,96 @@ export default function EditorPage({ params }: { params: { lang: string } }) {
     await fetchSlugs(section);
   }
 
+  async function deleteFile() {
+    const slug = newSlug.trim() || existingSlug;
+    if (!slug) {
+      setStatus(lang === "en" ? "Choose a slug before deleting." : "删除前请先选择 slug。" );
+      return;
+    }
+
+    const confirmed = window.confirm(
+      lang === "en" ? `Delete ${slug}.md? This cannot be undone.` : `确定删除 ${slug}.md 吗？此操作不可撤销。`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setLoading(true);
+    setStatus("");
+
+    const res = await fetch("/api/editor", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ section, slug })
+    });
+
+    setLoading(false);
+
+    if (!res.ok) {
+      const err = (await res.json().catch(() => null)) as { error?: string } | null;
+      setStatus(err?.error || (lang === "en" ? "Delete failed." : "删除失败。"));
+      return;
+    }
+
+    setStatus(lang === "en" ? `Deleted ${slug}.md` : `已删除 ${slug}.md`);
+    setContent("");
+    setNewSlug("");
+    await fetchSlugs(section);
+  }
+
+  if (!session) {
+    return (
+      <>
+        <h1 className="page-title">{ui.title}</h1>
+        <p className="page-subtitle">Loading session...</p>
+      </>
+    );
+  }
+
+  if (!session.authenticated) {
+    return (
+      <>
+        <h1 className="page-title">{ui.login}</h1>
+        <p className="page-subtitle">{ui.subtitle}</p>
+        {!session.configured ? <p className="meta">{ui.unconfigured}</p> : null}
+
+        <div className="card editor-grid" style={{ maxWidth: 420 }}>
+          <label className="editor-label">
+            {ui.password}
+            <input
+              className="editor-input"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  void signIn();
+                }
+              }}
+            />
+          </label>
+          <div className="editor-actions">
+            <button className="editor-btn primary" onClick={signIn} disabled={loading || !session.configured}>
+              {ui.signIn}
+            </button>
+          </div>
+        </div>
+        {status ? <p className="meta">{status}</p> : null}
+      </>
+    );
+  }
+
   return (
     <>
       <h1 className="page-title">{ui.title}</h1>
       <p className="page-subtitle">{ui.subtitle}</p>
+
+      <div className="editor-actions" style={{ marginBottom: 12 }}>
+        <button className="editor-btn" onClick={signOut}>
+          {ui.signOut}
+        </button>
+      </div>
 
       <div className="card editor-grid">
         <label className="editor-label">
@@ -206,11 +355,13 @@ export default function EditorPage({ params }: { params: { lang: string } }) {
           <button className="editor-btn primary" onClick={saveFile} disabled={loading}>
             {ui.save}
           </button>
+          <button className="editor-btn danger" onClick={deleteFile} disabled={loading}>
+            {ui.remove}
+          </button>
         </div>
       </div>
 
       <p className="meta">{ui.help}</p>
-      <p className="meta">{ui.deployNote}</p>
 
       <textarea
         className="editor-textarea"

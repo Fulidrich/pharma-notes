@@ -230,6 +230,12 @@ a.card:hover {
   color: #fff;
 }
 
+.editor-btn.danger {
+  color: #b52020;
+  border-color: #e0b8b8;
+  background: #fff6f6;
+}
+
 .editor-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;

@@ -5,6 +5,9 @@ import { Language, SectionKey, SECTION_KEYS } from "@/lib/i18n";
 
 const CONTENT_ROOT = path.join(process.cwd(), "src", "content");
 
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
 type BaseData = {
   title_en?: string;
   title_zh?: string;
@@ -12,6 +15,12 @@ type BaseData = {
   summary_zh?: string;
   body_en?: string;
   body_zh?: string;
+};
+
+type StoredDocument = {
+  section: SectionKey;
+  slug: string;
+  source: string;
 };
 
 export type ContentEntry = {
@@ -30,17 +39,95 @@ export type DrugTemplate = {
   fields: Array<{ key: string; label: string; value: string }>;
 };
 
-function readDirSafe(dir: string): string[] {
-  if (!fs.existsSync(dir)) {
-    return [];
-  }
-  return fs.readdirSync(dir).filter((f) => f.endsWith(".md"));
+export type SearchDoc = {
+  section: SectionKey;
+  slug: string;
+  title_en: string;
+  title_zh: string;
+  text_en: string;
+  text_zh: string;
+};
+
+type SupabaseRow = {
+  section: SectionKey;
+  slug: string;
+  content: string;
+};
+
+function hasSupabase(): boolean {
+  return Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
 }
 
-function readMarkdown(section: SectionKey, slug: string) {
-  const fullPath = path.join(CONTENT_ROOT, section, `${slug}.md`);
-  const source = fs.readFileSync(fullPath, "utf8");
-  return matter(source);
+async function supabaseRequest<T>(url: URL, init?: RequestInit): Promise<T> {
+  const key = SUPABASE_SERVICE_ROLE_KEY;
+  if (!key) {
+    throw new Error("Supabase service role key is missing.");
+  }
+
+  const response = await fetch(url, {
+    ...init,
+    cache: "no-store",
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {})
+    }
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`Supabase request failed (${response.status}): ${message}`);
+  }
+
+  if (response.status === 204) {
+    return null as T;
+  }
+
+  return (await response.json()) as T;
+}
+
+async function loadFromSupabase(section?: SectionKey): Promise<StoredDocument[]> {
+  const url = new URL("/rest/v1/notes", SUPABASE_URL);
+  url.searchParams.set("select", "section,slug,content");
+  url.searchParams.set("order", "slug.asc");
+
+  if (section) {
+    url.searchParams.set("section", `eq.${section}`);
+  }
+
+  const rows = await supabaseRequest<SupabaseRow[]>(url);
+  return rows.map((row) => ({ section: row.section, slug: row.slug, source: row.content ?? "" }));
+}
+
+function loadFromFileSystem(section?: SectionKey): StoredDocument[] {
+  const sections = section ? [section] : [...SECTION_KEYS];
+  const docs: StoredDocument[] = [];
+
+  sections.forEach((currentSection) => {
+    const dir = path.join(CONTENT_ROOT, currentSection);
+    if (!fs.existsSync(dir)) {
+      return;
+    }
+
+    fs.readdirSync(dir)
+      .filter((file) => file.endsWith(".md"))
+      .forEach((file) => {
+        const slug = file.replace(/\.md$/, "");
+        const source = fs.readFileSync(path.join(dir, file), "utf8");
+        docs.push({ section: currentSection, slug, source });
+      });
+  });
+
+  return docs;
+}
+
+async function loadDocuments(section?: SectionKey): Promise<StoredDocument[]> {
+  if (hasSupabase()) {
+    return loadFromSupabase(section);
+  }
+
+  return loadFromFileSystem(section);
 }
 
 function localized(data: BaseData, lang: Language, slug: string) {
@@ -54,36 +141,8 @@ function localized(data: BaseData, lang: Language, slug: string) {
   };
 }
 
-export function getCollectionEntries(section: SectionKey, lang: Language): ContentEntry[] {
-  const folder = path.join(CONTENT_ROOT, section);
-  const files = readDirSafe(folder);
-
-  return files
-    .map((file) => {
-      const slug = file.replace(/\.md$/, "");
-      const parsed = readMarkdown(section, slug);
-      const data = parsed.data as BaseData;
-      const loc = localized(data, lang, slug);
-
-      return {
-        slug,
-        section,
-        title: loc.title,
-        summary: loc.summary,
-        body: loc.body,
-        raw: parsed.data as Record<string, unknown>
-      };
-    })
-    .sort((a, b) => String(a.title).localeCompare(String(b.title)));
-}
-
-export function getEntry(section: SectionKey, slug: string, lang: Language): ContentEntry | null {
-  const fullPath = path.join(CONTENT_ROOT, section, `${slug}.md`);
-  if (!fs.existsSync(fullPath)) {
-    return null;
-  }
-
-  const parsed = readMarkdown(section, slug);
+function parseEntry(section: SectionKey, slug: string, source: string, lang: Language): ContentEntry {
+  const parsed = matter(source || "");
   const data = parsed.data as BaseData;
   const loc = localized(data, lang, slug);
 
@@ -97,8 +156,26 @@ export function getEntry(section: SectionKey, slug: string, lang: Language): Con
   };
 }
 
-export function getDrugPage(slug: string, lang: Language): DrugTemplate | null {
-  const entry = getEntry("drugs", slug, lang);
+export async function getCollectionEntries(section: SectionKey, lang: Language): Promise<ContentEntry[]> {
+  const docs = await loadDocuments(section);
+
+  return docs
+    .map((doc) => parseEntry(doc.section, doc.slug, doc.source, lang))
+    .sort((a, b) => String(a.title).localeCompare(String(b.title)));
+}
+
+export async function getEntry(section: SectionKey, slug: string, lang: Language): Promise<ContentEntry | null> {
+  const docs = await loadDocuments(section);
+  const doc = docs.find((item) => item.slug === slug);
+  if (!doc) {
+    return null;
+  }
+
+  return parseEntry(section, slug, doc.source, lang);
+}
+
+export async function getDrugPage(slug: string, lang: Language): Promise<DrugTemplate | null> {
+  const entry = await getEntry("drugs", slug, lang);
   if (!entry) {
     return null;
   }
@@ -132,46 +209,89 @@ export function getDrugPage(slug: string, lang: Language): DrugTemplate | null {
   };
 }
 
-export type SearchDoc = {
-  section: SectionKey;
-  slug: string;
-  title_en: string;
-  title_zh: string;
-  text_en: string;
-  text_zh: string;
-};
+export async function getSearchDocuments(): Promise<SearchDoc[]> {
+  const docs = await loadDocuments();
 
-export function getSearchDocuments(): SearchDoc[] {
-  const docs: SearchDoc[] = [];
+  return docs.map((doc) => {
+    const parsed = matter(doc.source || "");
+    const data = parsed.data as Record<string, unknown>;
 
-  for (const section of SECTION_KEYS) {
-    const folder = path.join(CONTENT_ROOT, section);
-    const files = readDirSafe(folder);
+    const textEn = Object.entries(data)
+      .filter(([k]) => k.endsWith("_en"))
+      .map(([, v]) => String(v))
+      .join("\n");
 
-    files.forEach((file) => {
-      const slug = file.replace(/\.md$/, "");
-      const parsed = readMarkdown(section, slug);
-      const data = parsed.data as Record<string, unknown>;
+    const textZh = Object.entries(data)
+      .filter(([k]) => k.endsWith("_zh"))
+      .map(([, v]) => String(v))
+      .join("\n");
 
-      const textEn = Object.entries(data)
-        .filter(([k]) => k.endsWith("_en"))
-        .map(([, v]) => String(v))
-        .join("\n");
-      const textZh = Object.entries(data)
-        .filter(([k]) => k.endsWith("_zh"))
-        .map(([, v]) => String(v))
-        .join("\n");
+    return {
+      section: doc.section,
+      slug: doc.slug,
+      title_en: String(data.title_en ?? doc.slug),
+      title_zh: String(data.title_zh ?? doc.slug),
+      text_en: textEn,
+      text_zh: textZh
+    };
+  });
+}
 
-      docs.push({
-        section,
-        slug,
-        title_en: String(data.title_en ?? slug),
-        title_zh: String(data.title_zh ?? slug),
-        text_en: textEn,
-        text_zh: textZh
-      });
+export async function listEditableSlugs(section: SectionKey): Promise<string[]> {
+  const docs = await loadDocuments(section);
+  return docs.map((doc) => doc.slug).sort((a, b) => a.localeCompare(b));
+}
+
+export async function readEditableMarkdown(section: SectionKey, slug: string): Promise<string | null> {
+  const docs = await loadDocuments(section);
+  const doc = docs.find((item) => item.slug === slug);
+  return doc ? doc.source : null;
+}
+
+export async function saveEditableMarkdown(section: SectionKey, slug: string, content: string): Promise<void> {
+  if (hasSupabase()) {
+    const url = new URL("/rest/v1/notes", SUPABASE_URL);
+    url.searchParams.set("on_conflict", "section,slug");
+
+    await supabaseRequest<void>(url, {
+      method: "POST",
+      headers: {
+        Prefer: "resolution=merge-duplicates,return=minimal"
+      },
+      body: JSON.stringify([{ section, slug, content }])
     });
+    return;
   }
 
-  return docs;
+  const dir = path.join(CONTENT_ROOT, section);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
+  fs.writeFileSync(path.join(dir, `${slug}.md`), content, "utf8");
+}
+
+export async function deleteEditableMarkdown(section: SectionKey, slug: string): Promise<void> {
+  if (hasSupabase()) {
+    const url = new URL("/rest/v1/notes", SUPABASE_URL);
+    url.searchParams.set("section", `eq.${section}`);
+    url.searchParams.set("slug", `eq.${slug}`);
+
+    await supabaseRequest<void>(url, {
+      method: "DELETE",
+      headers: {
+        Prefer: "return=minimal"
+      }
+    });
+    return;
+  }
+
+  const filePath = path.join(CONTENT_ROOT, section, `${slug}.md`);
+  if (fs.existsSync(filePath)) {
+    fs.unlinkSync(filePath);
+  }
+}
+
+export function isSupabaseStorageEnabled(): boolean {
+  return hasSupabase();
 }

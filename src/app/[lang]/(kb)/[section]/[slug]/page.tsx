@@ -20,7 +20,7 @@ export default async function ItemDetail({
   const section = params.section as SectionKey;
 
   if (section === "drugs") {
-    const drug = getDrugPage(params.slug, lang);
+    const drug = await getDrugPage(params.slug, lang);
     if (!drug) {
       notFound();
     }
@@ -39,7 +39,7 @@ export default async function ItemDetail({
     );
   }
 
-  const entry = getEntry(section, params.slug, lang);
+  const entry = await getEntry(section, params.slug, lang);
   if (!entry) {
     notFound();
   }

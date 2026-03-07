@@ -6,7 +6,7 @@ function normalize(value: string) {
   return value.toLowerCase().trim();
 }
 
-export function GET(request: NextRequest) {
+export async function GET(request: NextRequest) {
   const query = normalize(request.nextUrl.searchParams.get("q") || "");
   const langParam = request.nextUrl.searchParams.get("lang") || "en";
 
@@ -15,7 +15,7 @@ export function GET(request: NextRequest) {
   }
 
   const lang: Language = isLanguage(langParam) ? langParam : "en";
-  const docs = getSearchDocuments();
+  const docs = await getSearchDocuments();
 
   const results = docs
     .map((doc) => {

@@ -7,7 +7,7 @@ function isSection(section: string): section is SectionKey {
   return SECTION_KEYS.includes(section as SectionKey);
 }
 
-export default function SectionIndex({
+export default async function SectionIndex({
   params
 }: {
   params: { lang: string; section: string };
@@ -18,7 +18,7 @@ export default function SectionIndex({
 
   const lang = params.lang as Language;
   const section = params.section as SectionKey;
-  const entries = getCollectionEntries(section, lang);
+  const entries = await getCollectionEntries(section, lang);
 
   return <SectionList lang={lang} section={section} entries={entries} />;
 }

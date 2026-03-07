@@ -1,25 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAdminAuthenticated } from "@/lib/admin-auth";
 import {
-  getTemplate,
-  isSectionKey,
-  isValidSlug,
-  listSlugs,
-  readMarkdownFile,
-  saveMarkdownFile
-} from "@/lib/editor";
+  deleteEditableMarkdown,
+  isSupabaseStorageEnabled,
+  listEditableSlugs,
+  readEditableMarkdown,
+  saveEditableMarkdown
+} from "@/lib/content";
+import { getTemplate, isSectionKey, isValidSlug } from "@/lib/editor";
 
-const RUNTIME_WRITES_ENABLED = process.env.ALLOW_RUNTIME_WRITES === "true";
+function rejectUnauthorized() {
+  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+}
 
-export function GET(request: NextRequest) {
+function rejectInvalidSection() {
+  return NextResponse.json({ error: "Invalid section" }, { status: 400 });
+}
+
+export async function GET(request: NextRequest) {
+  if (!isAdminAuthenticated(request)) {
+    return rejectUnauthorized();
+  }
+
   const action = request.nextUrl.searchParams.get("action") || "list";
   const section = request.nextUrl.searchParams.get("section") || "";
 
   if (!isSectionKey(section)) {
-    return NextResponse.json({ error: "Invalid section" }, { status: 400 });
+    return rejectInvalidSection();
   }
 
   if (action === "list") {
-    return NextResponse.json({ slugs: listSlugs(section) });
+    return NextResponse.json({ slugs: await listEditableSlugs(section) });
   }
 
   if (action === "template") {
@@ -32,7 +43,7 @@ export function GET(request: NextRequest) {
       return NextResponse.json({ error: "Invalid slug" }, { status: 400 });
     }
 
-    const content = readMarkdownFile(section, slug);
+    const content = await readEditableMarkdown(section, slug);
     return NextResponse.json({ exists: content !== null, content: content ?? "" });
   }
 
@@ -40,14 +51,8 @@ export function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  if (process.env.NODE_ENV === "production" && !RUNTIME_WRITES_ENABLED) {
-    return NextResponse.json(
-      {
-        error:
-          "Runtime write is disabled in production. Deploy with a database/Git-backed editor, or set ALLOW_RUNTIME_WRITES=true only for self-hosted writable environments."
-      },
-      { status: 403 }
-    );
+  if (!isAdminAuthenticated(request)) {
+    return rejectUnauthorized();
   }
 
   const body = (await request.json()) as {
@@ -61,7 +66,7 @@ export async function POST(request: NextRequest) {
   const content = body.content;
 
   if (!isSectionKey(section)) {
-    return NextResponse.json({ error: "Invalid section" }, { status: 400 });
+    return rejectInvalidSection();
   }
 
   if (!isValidSlug(slug)) {
@@ -72,6 +77,45 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid content" }, { status: 400 });
   }
 
-  saveMarkdownFile(section, slug, content);
+  if (process.env.NODE_ENV === "production" && !isSupabaseStorageEnabled()) {
+    return NextResponse.json(
+      {
+        error: "Production editing requires Supabase storage. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
+      },
+      { status: 403 }
+    );
+  }
+
+  await saveEditableMarkdown(section, slug, content);
+  return NextResponse.json({ ok: true });
+}
+
+export async function DELETE(request: NextRequest) {
+  if (!isAdminAuthenticated(request)) {
+    return rejectUnauthorized();
+  }
+
+  const body = (await request.json().catch(() => null)) as { section?: string; slug?: string } | null;
+  const section = body?.section || "";
+  const slug = body?.slug || "";
+
+  if (!isSectionKey(section)) {
+    return rejectInvalidSection();
+  }
+
+  if (!isValidSlug(slug)) {
+    return NextResponse.json({ error: "Invalid slug" }, { status: 400 });
+  }
+
+  if (process.env.NODE_ENV === "production" && !isSupabaseStorageEnabled()) {
+    return NextResponse.json(
+      {
+        error: "Production deletion requires Supabase storage. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
+      },
+      { status: 403 }
+    );
+  }
+
+  await deleteEditableMarkdown(section, slug);
   return NextResponse.json({ ok: true });
 }

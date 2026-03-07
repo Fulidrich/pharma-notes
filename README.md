@@ -52,13 +52,38 @@ Editor supports:
 
 - selecting section and loading existing file
 - creating a new file from built-in template
-- saving directly into `src/content/<section>/<slug>.md`
+- saving directly into content storage
+- deleting existing entries
+
+Admin protection:
+
+- Set `ADMIN_PASSWORD` for login protection.
+- Open `/en/editor` or `/zh/editor`, sign in with that password.
 
 Important for deployment:
 
-- On Vercel production, filesystem writes are not persistent/read-only.
-- So `/editor` should be treated as local-dev editing only.
-- For cloud editing, move save logic to a database or Git-backed content API.
+- For cloud editing, configure Supabase storage (recommended).
+- Without Supabase in production, write/delete APIs are blocked.
+
+### Supabase Storage Setup
+
+Add env vars in your hosting platform:
+
+- `ADMIN_PASSWORD=your-strong-password`
+- `SUPABASE_URL=https://<project-ref>.supabase.co`
+- `SUPABASE_SERVICE_ROLE_KEY=<service-role-key>`
+
+Create table in Supabase SQL editor:
+
+```sql
+create table if not exists public.notes (
+  section text not null,
+  slug text not null,
+  content text not null default '',
+  updated_at timestamptz not null default now(),
+  primary key (section, slug)
+);
+```
 
 ## Deploy (Vercel)
 
