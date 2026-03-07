@@ -6,8 +6,8 @@ import { Language, SectionKey, SECTION_KEYS } from "@/lib/i18n";
 const CONTENT_ROOT = path.join(process.cwd(), "src", "content");
 
 type BaseData = {
-  title_en: string;
-  title_zh: string;
+  title_en?: string;
+  title_zh?: string;
   summary_en?: string;
   summary_zh?: string;
   body_en?: string;
@@ -43,9 +43,12 @@ function readMarkdown(section: SectionKey, slug: string) {
   return matter(source);
 }
 
-function localized(data: BaseData, lang: Language) {
+function localized(data: BaseData, lang: Language, slug: string) {
+  const titleEn = typeof data.title_en === "string" && data.title_en.trim() ? data.title_en : slug;
+  const titleZh = typeof data.title_zh === "string" && data.title_zh.trim() ? data.title_zh : slug;
+
   return {
-    title: lang === "en" ? data.title_en : data.title_zh,
+    title: lang === "en" ? titleEn : titleZh,
     summary: lang === "en" ? data.summary_en ?? "" : data.summary_zh ?? "",
     body: lang === "en" ? data.body_en ?? "" : data.body_zh ?? ""
   };
@@ -60,7 +63,7 @@ export function getCollectionEntries(section: SectionKey, lang: Language): Conte
       const slug = file.replace(/\.md$/, "");
       const parsed = readMarkdown(section, slug);
       const data = parsed.data as BaseData;
-      const loc = localized(data, lang);
+      const loc = localized(data, lang, slug);
 
       return {
         slug,
@@ -71,7 +74,7 @@ export function getCollectionEntries(section: SectionKey, lang: Language): Conte
         raw: parsed.data as Record<string, unknown>
       };
     })
-    .sort((a, b) => a.title.localeCompare(b.title));
+    .sort((a, b) => String(a.title).localeCompare(String(b.title)));
 }
 
 export function getEntry(section: SectionKey, slug: string, lang: Language): ContentEntry | null {
@@ -82,7 +85,7 @@ export function getEntry(section: SectionKey, slug: string, lang: Language): Con
 
   const parsed = readMarkdown(section, slug);
   const data = parsed.data as BaseData;
-  const loc = localized(data, lang);
+  const loc = localized(data, lang, slug);
 
   return {
     slug,
