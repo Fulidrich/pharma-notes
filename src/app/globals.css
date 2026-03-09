@@ -254,6 +254,65 @@ a.card:hover {
   background: #fff;
 }
 
+.catalog-jump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.catalog-jump-link {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.86rem;
+  color: #3f556f;
+  background: #f8fbff;
+}
+
+.catalog-block {
+  padding: 14px 16px;
+}
+
+.catalog-head {
+  margin: 0 0 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 1rem;
+}
+
+.catalog-count {
+  color: #496282;
+  background: #edf4fd;
+  border: 1px solid #d3e3f7;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  padding: 2px 8px;
+}
+
+.catalog-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px;
+}
+
+.catalog-item {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.catalog-item:hover {
+  border-color: #b4c8de;
+  background: #f8fbff;
+}
+
+.catalog-item-title {
+  font-size: 0.93rem;
+  color: #20334a;
+}
+
 @media (max-width: 960px) {
   .app-shell {
     grid-template-columns: 1fr;

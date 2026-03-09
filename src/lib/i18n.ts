@@ -29,6 +29,7 @@ export const labels = {
       "study-notes": "Study Notes"
     },
     search: "Search",
+    catalog: "Catalog",
     editor: "Editor",
     subtitle: "Personal pharmacology knowledge base",
     noResults: "No results found."
@@ -44,6 +45,7 @@ export const labels = {
       "study-notes": "学习笔记"
     },
     search: "搜索",
+    catalog: "目录",
     editor: "编辑器",
     subtitle: "个人药理学知识库",
     noResults: "未找到结果。"

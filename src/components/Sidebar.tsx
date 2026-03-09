@@ -14,6 +14,9 @@ export function Sidebar({ lang }: { lang: Language }) {
             {t.sections[key]}
           </Link>
         ))}
+        <Link href={`/${lang}/catalog`} className="nav-link">
+          {t.catalog}
+        </Link>
         <Link href={`/${lang}/editor`} className="nav-link">
           {t.editor}
         </Link>
